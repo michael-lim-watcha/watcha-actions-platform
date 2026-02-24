@@ -162,8 +162,14 @@ jobs:
               --title "chore: back-merge main → develop (${{ steps.tag.outputs.version }})" \
               --body-file /tmp/pr_body.md)
             echo "PR created: $pr_url"
-            gh pr merge "$back_branch" --auto --merge
-            echo "Auto-merge enabled: will merge when CI passes"
+            # branch protection 설정 시 --auto로 CI 통과 후 머지
+            # 미설정 시 fallback: 즉시 머지
+            if ! gh pr merge "$back_branch" --auto --merge 2>/dev/null; then
+              gh pr merge "$back_branch" --merge
+              echo "Merged directly (no branch protection configured)"
+            else
+              echo "Auto-merge enabled: will merge when CI passes"
+            fi
           else
             git merge --abort
             echo "::warning::Merge conflict detected. Please manually back-merge main into develop."
