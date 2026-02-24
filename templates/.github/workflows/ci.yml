@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - 'release-*'
+      - 'hotfix-*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci-develop:
+    if: github.ref == 'refs/heads/develop'
+    uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-service-cicd.yml@main
+    with:
+      app_name: YOUR_APP_NAME                              # ← 교체
+      environment: dev
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME   # ← 교체
+      image_tag_prefix: dev-
+      run_lint: true
+      lint_command: echo "replace with your lint command" # ← 교체 (e.g. uv run ruff check, pnpm lint)
+    secrets: inherit
+
+  ci-release:
+    if: |
+      startsWith(github.ref, 'refs/heads/release-') ||
+      startsWith(github.ref, 'refs/heads/hotfix-')
+    uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-service-cicd.yml@main
+    with:
+      app_name: YOUR_APP_NAME                              # ← 교체
+      environment: staging
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME   # ← 교체
+      image_tag_prefix: stg-
+    secrets: inherit

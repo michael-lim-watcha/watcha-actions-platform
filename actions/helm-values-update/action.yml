@@ -1,0 +1,64 @@
+name: helm-values-update
+description: Update image tag in Helm values file and push (GitOps CD trigger)
+
+inputs:
+  helm-repo:
+    required: true
+  helm-ref:
+    required: false
+    default: main
+  helm-values-path:
+    required: true
+  image-tag:
+    required: true
+  token:
+    required: true
+  app-name:
+    required: true
+  environment:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout helm repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.helm-repo }}
+        ref: ${{ inputs.helm-ref }}
+        token: ${{ inputs.token }}
+        path: helm-values
+
+    - name: Update values tag
+      shell: bash
+      run: |
+        set -euo pipefail
+        file="helm-values/${{ inputs.helm-values-path }}"
+        if [[ ! -f "$file" ]]; then
+          echo "missing file: $file"
+          exit 1
+        fi
+        sed -i -E "s#^([[:space:]]*tag:[[:space:]]*).*\$#\\1${{ inputs.image-tag }}#" "$file" || true
+        if ! grep -q "^[[:space:]]*tag:[[:space:]]*${{ inputs.image-tag }}$" "$file"; then
+          awk -v t="${{ inputs.image-tag }}" '
+            /^[[:space:]]*tag:[[:space:]]*/ { sub(/:.*/, ": " t); changed=1 }
+            { print }
+            END { if (!changed) exit 2 }
+          ' "$file" > "$file.tmp"
+          mv "$file.tmp" "$file"
+        fi
+
+    - name: Commit and push
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd helm-values
+        git config user.email "platform-cicd@watcha.com"
+        git config user.name "watcha-platform-cicd"
+        git add "${{ inputs.helm-values-path }}"
+        if git diff --cached --quiet; then
+          echo "No changes"
+          exit 0
+        fi
+        git commit -m "[CI] ${{ inputs.app-name }} ${{ inputs.environment }} image=${{ inputs.image-tag }}"
+        git push origin "${{ inputs.helm-ref }}"

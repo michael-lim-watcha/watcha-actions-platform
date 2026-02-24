@@ -1,0 +1,170 @@
+name: reusable-ci-main
+
+# NOTE(production): ECR 전환 시 변경 필요:
+#   - docker/login-action(ghcr) → ecr-build-push composite action (extra-tag: latest)
+#   - runner_label: ubuntu-latest → arc-shared (self-hosted)
+#   - cache-from/to: type=gha → type=registry (ECR buildcache)
+#   - helm-values-update step 추가 (prod CD trigger)
+
+on:
+  workflow_call:
+    inputs:
+      image_repository:
+        description: Full image repository URI (e.g. ghcr.io/org/service)
+        required: true
+        type: string
+      dockerfile:
+        required: false
+        type: string
+        default: Dockerfile
+      context:
+        required: false
+        type: string
+        default: .
+      back_merge_enabled:
+        description: Create back-merge PR to develop when fix commits exist
+        required: false
+        type: boolean
+        default: true
+      initial_version:
+        description: Version to use when no git tags exist
+        required: false
+        type: string
+        default: v0.1.0
+    secrets:
+      GH_PAT:
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  deploy-production:
+    name: Docker Build (Production)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # fetch-tags: true 옵션은 신뢰성 문제 있음 → 명시적 fetch
+      - name: Fetch all tags
+        run: git fetch --tags --force
+
+      - name: Resolve next version
+        id: tag
+        run: |
+          latest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$latest" ]; then
+            next="${{ inputs.initial_version }}"
+          else
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+          echo "version=${next}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.image_repository }}
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.version }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # TODO(production): helm-values-update (prod CD trigger)
+
+      - name: Create git tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag ${{ steps.tag.outputs.version }}
+          git push origin ${{ steps.tag.outputs.version }}
+          gh release create ${{ steps.tag.outputs.version }} \
+            --generate-notes \
+            --title "${{ steps.tag.outputs.version }}"
+
+      # 머지 커밋 메시지에서 브랜치명 파싱: "Merge pull request #N from owner/release-X.Y.Z"
+      - name: Delete release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          commit_msg=$(git log -1 --pretty=%s)
+          branch=$(echo "$commit_msg" | grep -oE '(release|hotfix)-[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          if [ -n "$branch" ]; then
+            echo "Deleting merged branch: $branch"
+            gh api -X DELETE "/repos/${{ github.repository }}/git/refs/heads/${branch}" \
+              && echo "Deleted: $branch" \
+              || echo "Branch not found or already deleted: $branch"
+          else
+            echo "No release/hotfix branch found in commit message: $commit_msg"
+          fi
+
+      # release 브랜치에 fix 커밋이 있을 때만 back-merge PR 생성
+      # (클린 릴리즈는 develop이 이미 최신 → skip)
+      - name: Back-merge main to develop
+        if: ${{ inputs.back_merge_enabled }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          git fetch origin develop
+          commits=$(git log origin/develop..origin/main --oneline)
+          if [ -z "$commits" ]; then
+            echo "No back-merge needed (develop already has all commits)"
+            exit 0
+          fi
+
+          echo "Back-merge needed. Commits not in develop:"
+          echo "$commits"
+
+          back_branch="back-merge/${{ steps.tag.outputs.version }}"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -b "$back_branch" origin/develop
+
+          if git merge origin/main --no-edit -m "chore: back-merge main into develop (${{ steps.tag.outputs.version }})"; then
+            git push origin "$back_branch"
+            {
+              echo "## Back-merge: main → develop"
+              echo ""
+              echo "릴리즈 \`${{ steps.tag.outputs.version }}\` 에서 직접 수정된 커밋을 develop에 역병합합니다."
+              echo ""
+              echo "### 포함된 커밋"
+              echo "$commits" | sed 's/^/- /'
+              echo ""
+              echo "---"
+              echo "> \`ci-main\` 워크플로우에 의해 자동 생성"
+            } > /tmp/pr_body.md
+            pr_url=$(gh pr create \
+              --base develop \
+              --head "$back_branch" \
+              --title "chore: back-merge main → develop (${{ steps.tag.outputs.version }})" \
+              --body-file /tmp/pr_body.md)
+            echo "PR created: $pr_url"
+            gh pr merge "$back_branch" --auto --merge
+            echo "Auto-merge enabled: will merge when CI passes"
+          else
+            git merge --abort
+            echo "::warning::Merge conflict detected. Please manually back-merge main into develop."
+          fi
