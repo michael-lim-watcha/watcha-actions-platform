@@ -164,8 +164,8 @@ jobs:
             echo "PR created: $pr_url"
             # branch protection 설정 시 --auto로 CI 통과 후 머지
             # 미설정 시 fallback: 즉시 머지
-            if ! gh pr merge "$back_branch" --auto --merge 2>/dev/null; then
-              gh pr merge "$back_branch" --merge
+            if ! gh pr merge "$back_branch" --auto --merge --delete-branch 2>/dev/null; then
+              gh pr merge "$back_branch" --merge --delete-branch
               echo "Merged directly (no branch protection configured)"
             else
               echo "Auto-merge enabled: will merge when CI passes"
