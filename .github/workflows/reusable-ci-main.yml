@@ -38,6 +38,7 @@ on:
 permissions:
   contents: write
   packages: write
+  pull-requests: read
 
 jobs:
   deploy-production:
@@ -136,7 +137,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           git fetch origin develop
-          commits=$(git log origin/develop..origin/main --oneline)
+          commits=$(git log origin/develop..origin/main --no-merges --oneline)
           if [ -z "$commits" ]; then
             echo "No back-merge needed (develop already has all commits)"
             exit 0
