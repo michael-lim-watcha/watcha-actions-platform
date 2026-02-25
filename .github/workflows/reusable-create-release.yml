@@ -61,15 +61,23 @@ jobs:
           echo "version=v${version}" >> "$GITHUB_OUTPUT"
           echo "release_branch=$release_branch" >> "$GITHUB_OUTPUT"
 
+      - name: Guard single release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=$(git ls-remote --heads origin 'refs/heads/release-*' \
+            | sed 's|.*refs/heads/||' || true)
+          if [[ -n "$existing" ]]; then
+            echo "::error::Active release branch exists: ${existing}"
+            echo "Merge or delete '${existing}' before creating a new release."
+            exit 1
+          fi
+
       - name: Create release branch
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin "${{ inputs.base_branch }}"
-          if git ls-remote --heads origin "${{ steps.mk.outputs.release_branch }}" | grep -q .; then
-            echo "release branch already exists: ${{ steps.mk.outputs.release_branch }}"
-            exit 1
-          fi
           git checkout -B "${{ steps.mk.outputs.release_branch }}" "origin/${{ inputs.base_branch }}"
           git push origin "${{ steps.mk.outputs.release_branch }}"
 
