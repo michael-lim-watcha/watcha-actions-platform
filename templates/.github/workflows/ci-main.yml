@@ -12,5 +12,5 @@ jobs:
   main:
     uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-ci-main.yml@main
     with:
-      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME   # ← 교체
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME
     secrets: inherit

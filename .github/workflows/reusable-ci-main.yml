@@ -105,20 +105,27 @@ jobs:
             --generate-notes \
             --title "${{ steps.tag.outputs.version }}"
 
-      # 머지 커밋 메시지에서 브랜치명 파싱: "Merge pull request #N from owner/release-X.Y.Z"
+      # GitHub API로 머지된 PR의 head branch 조회 (squash/rebase merge에도 동작)
       - name: Delete release branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          commit_msg=$(git log -1 --pretty=%s)
-          branch=$(echo "$commit_msg" | grep -oE '(release|hotfix)-[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          branch=$(gh api "/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].head.ref // empty' 2>/dev/null || true)
+
+          # API 실패 시 커밋 메시지 파싱 fallback
+          if [ -z "$branch" ]; then
+            commit_msg=$(git log -1 --pretty=%s)
+            branch=$(echo "$commit_msg" | grep -oE '(release-[0-9]+\.[0-9]+\.[0-9]+|hotfix/[^ "]+|hotfix)' | head -1)
+          fi
+
           if [ -n "$branch" ]; then
             echo "Deleting merged branch: $branch"
             gh api -X DELETE "/repos/${{ github.repository }}/git/refs/heads/${branch}" \
               && echo "Deleted: $branch" \
               || echo "Branch not found or already deleted: $branch"
           else
-            echo "No release/hotfix branch found in commit message: $commit_msg"
+            echo "No release/hotfix branch found for commit: ${{ github.sha }}"
           fi
 
       # release 브랜치에 fix 커밋이 있을 때만 back-merge PR 생성
@@ -137,6 +144,9 @@ jobs:
 
           echo "Back-merge needed. Commits not in develop:"
           echo "$commits"
+
+          # PAT으로 remote 전환 (GITHUB_TOKEN push는 workflow 트리거 안 됨 + Branch Protection 제한)
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
           back_branch="back-merge/${{ steps.tag.outputs.version }}"
           git config user.email "github-actions[bot]@users.noreply.github.com"

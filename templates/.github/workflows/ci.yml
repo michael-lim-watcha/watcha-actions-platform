@@ -5,7 +5,19 @@ on:
     branches:
       - develop
       - 'release-*'
-      - 'hotfix-*'
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.github/*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 배포 환경 (hotfix staging 검증 등)
+        required: true
+        type: choice
+        options: [dev, staging]
+        default: staging
 
 permissions:
   contents: read
@@ -13,25 +25,37 @@ permissions:
 
 jobs:
   ci-develop:
-    if: github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-service-cicd.yml@main
     with:
-      app_name: YOUR_APP_NAME                              # ← 교체
+      app_name: YOUR_APP_NAME
       environment: dev
-      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME   # ← 교체
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME
       image_tag_prefix: dev-
-      run_lint: true
-      lint_command: echo "replace with your lint command" # ← 교체 (e.g. uv run ruff check, pnpm lint)
+      # setup_command: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # run_lint: true
+      # lint_command: uv run ruff check src/
+      # run_test: true
+      # test_command: uv run pytest tests/
     secrets: inherit
 
   ci-release:
-    if: |
-      startsWith(github.ref, 'refs/heads/release-') ||
-      startsWith(github.ref, 'refs/heads/hotfix-')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-')
     uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-service-cicd.yml@main
     with:
-      app_name: YOUR_APP_NAME                              # ← 교체
+      app_name: YOUR_APP_NAME
       environment: staging
-      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME   # ← 교체
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME
       image_tag_prefix: stg-
+      # setup_command, run_lint, lint_command 등 ci-develop과 동일하게 설정 권장
+    secrets: inherit
+
+  ci-manual:
+    if: github.event_name == 'workflow_dispatch'
+    uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-service-cicd.yml@main
+    with:
+      app_name: YOUR_APP_NAME
+      environment: ${{ inputs.environment }}
+      image_repository: ghcr.io/YOUR_ORG/YOUR_APP_NAME
+      image_tag_prefix: ${{ inputs.environment == 'staging' && 'stg-' || 'dev-' }}
     secrets: inherit
