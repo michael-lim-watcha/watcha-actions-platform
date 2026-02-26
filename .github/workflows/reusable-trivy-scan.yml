@@ -45,7 +45,7 @@ jobs:
 
       # DB 최초 다운로드
       - name: Trivy scan (table)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image_uri }}
           format: table
@@ -60,7 +60,7 @@ jobs:
 
       # DB 재사용
       - name: Trivy scan (json)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image_uri }}
           format: json
@@ -76,7 +76,7 @@ jobs:
 
       - name: npm scan (json)
         if: ${{ inputs.run_npm_scan }}
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image_uri }}
           format: json
@@ -91,7 +91,7 @@ jobs:
           args: --skip-db-update
 
       - name: Trivy scan (SARIF)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ inputs.image_uri }}
           format: sarif
