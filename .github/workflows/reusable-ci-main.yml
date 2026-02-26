@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   deploy-production:
-    name: Docker Build (Production)
+    name: build (production)
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
