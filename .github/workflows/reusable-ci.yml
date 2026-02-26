@@ -81,7 +81,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate
+    name: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +96,7 @@ jobs:
         run: ${{ inputs.test_command }}
 
   build:
-    name: Docker Build (${{ inputs.environment }})
+    name: build (${{ inputs.environment }})
     needs: validate
     if: ${{ inputs.run_build }}
     runs-on: ubuntu-latest
@@ -135,7 +135,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy (${{ inputs.environment }})
+    name: deploy (${{ inputs.environment }})
     needs: build
     if: ${{ inputs.run_deploy }}
     runs-on: ubuntu-latest
