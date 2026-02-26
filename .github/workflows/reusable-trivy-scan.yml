@@ -1,0 +1,177 @@
+name: reusable-trivy-scan
+
+on:
+  workflow_call:
+    inputs:
+      image_uri:
+        description: "스캔할 이미지 전체 URI (e.g. ghcr.io/org/app:tag)"
+        required: true
+        type: string
+      run_npm_scan:
+        description: npm 패키지 취약점 스캔 추가 실행
+        required: false
+        type: boolean
+        default: false
+      severity:
+        description: "스캔 대상 심각도"
+        required: false
+        type: string
+        default: CRITICAL,HIGH,MEDIUM
+      ignore_unfixed:
+        description: 패치 미제공 취약점 무시
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  packages: read
+  security-events: write
+
+jobs:
+  scan:
+    name: trivy scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        run: docker pull ${{ inputs.image_uri }}
+
+      # DB 최초 다운로드
+      - name: Trivy scan (table)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ inputs.image_uri }}
+          format: table
+          output: trivy.txt
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore_unfixed }}
+          vuln-type: os,library
+          severity: ${{ inputs.severity }}
+          hide-progress: true
+          timeout: 10m
+          scanners: vuln,secret
+
+      # DB 재사용
+      - name: Trivy scan (json)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ inputs.image_uri }}
+          format: json
+          output: trivy-results.json
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore_unfixed }}
+          vuln-type: os,library
+          severity: ${{ inputs.severity }}
+          hide-progress: true
+          timeout: 10m
+          scanners: vuln,secret
+          args: --skip-db-update
+
+      - name: npm scan (json)
+        if: ${{ inputs.run_npm_scan }}
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ inputs.image_uri }}
+          format: json
+          output: trivy-npm-results.json
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore_unfixed }}
+          vuln-type: library
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          hide-progress: true
+          timeout: 10m
+          scanners: vuln
+          args: --skip-db-update
+
+      - name: Trivy scan (SARIF)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ inputs.image_uri }}
+          format: sarif
+          output: trivy.sarif
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore_unfixed }}
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          hide-progress: true
+          timeout: 10m
+          scanners: vuln
+          args: --skip-db-update
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy.sarif
+
+      - name: Publish to Step Summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Scan"
+            echo "\`${{ inputs.image_uri }}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f trivy-results.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-results.json)
+            {
+              echo "### OS / Library"
+              echo "| Severity | Count |"
+              echo "|----------|-------|"
+              echo "| 🔴 Critical | ${CRITICAL} |"
+              echo "| 🟠 High     | ${HIGH} |"
+              echo "| 🟡 Medium   | ${MEDIUM} |"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -f trivy-npm-results.json ]; then
+            NPM_CRITICAL=$(jq '[.Results[]? | select(.Class == "lang-pkgs") | .Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-npm-results.json 2>/dev/null || echo "0")
+            NPM_HIGH=$(jq '[.Results[]? | select(.Class == "lang-pkgs") | .Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-npm-results.json 2>/dev/null || echo "0")
+            NPM_MEDIUM=$(jq '[.Results[]? | select(.Class == "lang-pkgs") | .Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-npm-results.json 2>/dev/null || echo "0")
+            NPM_LOW=$(jq '[.Results[]? | select(.Class == "lang-pkgs") | .Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-npm-results.json 2>/dev/null || echo "0")
+            {
+              echo "### npm Packages"
+              echo "| Severity | Count |"
+              echo "|----------|-------|"
+              echo "| 🔴 Critical | ${NPM_CRITICAL} |"
+              echo "| 🟠 High     | ${NPM_HIGH} |"
+              echo "| 🟡 Medium   | ${NPM_MEDIUM} |"
+              echo "| 🔵 Low      | ${NPM_LOW} |"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ -s trivy.txt ]]; then
+            {
+              echo "<details><summary>상세 결과 보기</summary>"
+              echo ""
+              echo '```text'
+              cat trivy.txt
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-scan-${{ github.run_id }}
+          path: |
+            trivy.txt
+            trivy-results.json
+            trivy-npm-results.json
+            trivy.sarif
+          retention-days: 30

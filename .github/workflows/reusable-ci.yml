@@ -70,6 +70,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_npm_scan:
+        description: "true 시 npm 패키지 취약점 스캔 추가 실행. run_scan: true 시에만 동작"
+        required: false
+        type: boolean
+        default: false
     outputs:
       image_tag:
         description: Built image tag (e.g. dev-abc1234)
@@ -78,6 +83,7 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   validate:
@@ -134,10 +140,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  scan:
+    name: scan (${{ inputs.environment }})
+    needs: build
+    if: ${{ inputs.run_scan }}
+    uses: michael-lim-watcha/watcha-actions-platform/.github/workflows/reusable-trivy-scan.yml@main
+    with:
+      image_uri: ${{ inputs.image_repository }}:${{ needs.build.outputs.image_tag }}
+      run_npm_scan: ${{ inputs.run_npm_scan }}
+
   deploy:
     name: deploy (${{ inputs.environment }})
-    needs: build
-    if: ${{ inputs.run_deploy }}
+    needs: [build, scan]
+    if: >-
+      always()
+      && inputs.run_deploy
+      && needs.build.result == 'success'
+      && (needs.scan.result == 'success' || needs.scan.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       # TODO(production): helm-values-update composite action으로 교체
