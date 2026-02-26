@@ -152,11 +152,7 @@ jobs:
   deploy:
     name: deploy (${{ inputs.environment }})
     needs: [build, scan]
-    if: >-
-      always()
-      && inputs.run_deploy
-      && needs.build.result == 'success'
-      && (needs.scan.result == 'success' || needs.scan.result == 'skipped')
+    if: ${{ always() && inputs.run_deploy && needs.build.result == 'success' && (needs.scan.result == 'success' || needs.scan.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       # TODO(production): helm-values-update composite action으로 교체
