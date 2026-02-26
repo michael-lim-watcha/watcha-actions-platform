@@ -1,0 +1,64 @@
+name: ECR Build & Push
+description: Build Docker image and push to AWS ECR (GitOps CD trigger용 이미지 빌드)
+
+inputs:
+  app_name:
+    description: ECR repository name
+    required: true
+  image_tag:
+    description: Image tag to apply (e.g. dev-abc1234, vX.Y.Z)
+    required: true
+  dockerfile:
+    description: Path to Dockerfile
+    required: false
+    default: Dockerfile
+  context:
+    description: Docker build context
+    required: false
+    default: .
+  aws_region:
+    description: AWS region
+    required: false
+    default: ap-northeast-2
+  ecr_registry:
+    description: ECR registry URI (e.g. 123456789.dkr.ecr.ap-northeast-2.amazonaws.com)
+    required: true
+
+outputs:
+  image_uri:
+    description: Full image URI with tag (e.g. 123456789.dkr.ecr.../app:tag)
+    value: ${{ steps.set_uri.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set image URI
+      id: set_uri
+      shell: bash
+      run: echo "value=${{ inputs.ecr_registry }}/${{ inputs.app_name }}:${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+
+    # TODO(production): 아래 단계들로 교체
+    #   - uses: aws-actions/configure-aws-credentials@v4
+    #     with:
+    #       role-to-assume: arn:aws:iam::ACCOUNT:role/github-actions-ecr
+    #       aws-region: ${{ inputs.aws_region }}
+    #
+    #   - uses: aws-actions/amazon-ecr-login@v2
+    #
+    #   - uses: docker/build-push-action@v6
+    #     with:
+    #       context: ${{ inputs.context }}
+    #       file: ${{ inputs.dockerfile }}
+    #       push: true
+    #       tags: ${{ steps.set_uri.outputs.value }}
+    #       cache-from: type=registry,ref=${{ inputs.ecr_registry }}/${{ inputs.app_name }}:cache
+    #       cache-to: type=registry,ref=${{ inputs.ecr_registry }}/${{ inputs.app_name }}:cache,mode=max
+    - name: Build & push placeholder
+      shell: bash
+      run: |
+        echo "[ECR] Building ${{ inputs.app_name }}:${{ inputs.image_tag }}"
+        echo "  Registry  : ${{ inputs.ecr_registry }}"
+        echo "  Dockerfile: ${{ inputs.dockerfile }}"
+        echo "  Context   : ${{ inputs.context }}"
+        echo "  Image URI : ${{ steps.set_uri.outputs.value }}"
+        echo "TODO(production): aws ecr login → docker build & push"

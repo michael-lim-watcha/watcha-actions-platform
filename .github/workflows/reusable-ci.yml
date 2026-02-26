@@ -1,10 +1,10 @@
-name: reusable-service-cicd
+name: reusable-ci
 
 # NOTE(production): ECR 전환 시 변경 필요:
-#   - docker/login-action(ghcr) → ecr-build-push composite action
+#   - build job: docker/login-action(ghcr) → ecr-build-push composite action
 #   - runner_label: ubuntu-latest → arc-shared (self-hosted)
-#   - cache-from/to: type=gha → type=registry (ECR buildcache)
-#   - deploy placeholder → helm-values-update composite action
+#   - cache: type=gha → type=registry (ECR buildcache)
+#   - deploy job: placeholder echo → helm-values-update composite action
 
 on:
   workflow_call:
@@ -55,6 +55,21 @@ on:
         required: false
         type: string
         default: "echo 'test-skip'"
+      run_build:
+        description: "false 시 build/scan/deploy 전체 스킵 → validate only (dev 환경 없는 서비스용)"
+        required: false
+        type: boolean
+        default: true
+      run_deploy:
+        description: "false 시 deploy job 스킵. caller가 직접 helm-values-update 호출하는 멀티 Helm 패턴용"
+        required: false
+        type: boolean
+        default: true
+      run_scan:
+        description: "true 시 Trivy 취약점 스캔 실행. staging 전용"
+        required: false
+        type: boolean
+        default: false
     outputs:
       image_tag:
         description: Built image tag (e.g. dev-abc1234)
@@ -83,6 +98,7 @@ jobs:
   build:
     name: Docker Build (${{ inputs.environment }})
     needs: validate
+    if: ${{ inputs.run_build }}
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set_tag.outputs.value }}
@@ -118,7 +134,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    needs: build
+    if: ${{ inputs.run_deploy }}
+    runs-on: ubuntu-latest
+    steps:
+      # TODO(production): helm-values-update composite action으로 교체
+      #   - uses: watcha/watcha-actions-platform/actions/helm-values-update@v1
+      #     with:
+      #       token: ${{ secrets.GH_PAT }}
+      #       helm-repo: watcha/bartender-helm
+      #       helm-values-path: charts/${{ inputs.app_name }}/values.server.${{ inputs.environment }}.yaml
+      #       image-tag: ${{ needs.build.outputs.image_tag }}
+      #       app-name: ${{ inputs.app_name }}
+      #       environment: ${{ inputs.environment }}
       - name: Deploy placeholder
         run: |
-          echo "[${{ inputs.environment }}] ${{ inputs.app_name }} → ${{ steps.set_tag.outputs.value }}"
+          echo "[${{ inputs.environment }}] ${{ inputs.app_name }} → ${{ needs.build.outputs.image_tag }}"
           echo "TODO(production): helm-values-update → ArgoCD sync"

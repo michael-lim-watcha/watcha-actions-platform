@@ -96,6 +96,69 @@ jobs:
 
       # TODO(production): helm-values-update (prod CD trigger)
 
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prev_tag=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+
+          # prev_tag ~ HEAD 사이 커밋에서 PR 번호 추출
+          # merge commit:  "Merge pull request #N from ..."
+          # squash commit: "PR title (#N)"
+          if [ -n "$prev_tag" ]; then
+            log_range="${prev_tag}..HEAD"
+          else
+            log_range="HEAD"
+          fi
+
+          pr_numbers=$(
+            git log "$log_range" --pretty=format:"%s" \
+              | grep -v "^chore: back-merge\|^release:" \
+              | grep -oE '#[0-9]+' \
+              | grep -oE '[0-9]+' \
+              | sort -u
+          )
+
+          features="" fixes="" hotfixes="" maintenance=""
+          refactoring="" docs="" reverts="" abtests="" others=""
+
+          for pr_num in $pr_numbers; do
+            pr_data=$(gh api "repos/${{ github.repository }}/pulls/${pr_num}" \
+              --jq '{title: .title, ref: .head.ref}' 2>/dev/null) || continue
+            title=$(echo "$pr_data" | jq -r '.title')
+            ref=$(echo  "$pr_data" | jq -r '.ref')
+            entry="- ${title} (#${pr_num})\n"
+
+            case "$ref" in
+              feature/*)  features="${features}${entry}"    ;;
+              fix/*)      fixes="${fixes}${entry}"          ;;
+              hotfix/*)   hotfixes="${hotfixes}${entry}"    ;;
+              chore/*)    maintenance="${maintenance}${entry}" ;;
+              refactor/*) refactoring="${refactoring}${entry}" ;;
+              docs/*)     docs="${docs}${entry}"            ;;
+              revert/*)   reverts="${reverts}${entry}"      ;;
+              abtest/*)   abtests="${abtests}${entry}"      ;;
+              *)          others="${others}${entry}"        ;;
+            esac
+          done
+
+          {
+            echo "## What's Changed"
+            echo ""
+            [ -n "$features"    ] && printf "### 🚀 Features\n%b\n"       "$features"
+            [ -n "$fixes"       ] && printf "### 🐛 Bug Fixes\n%b\n"      "$fixes"
+            [ -n "$hotfixes"    ] && printf "### 🔥 Hotfixes\n%b\n"       "$hotfixes"
+            [ -n "$maintenance" ] && printf "### 🧹 Maintenance\n%b\n"    "$maintenance"
+            [ -n "$refactoring" ] && printf "### ♻️ Refactoring\n%b\n"    "$refactoring"
+            [ -n "$docs"        ] && printf "### 📝 Docs\n%b\n"           "$docs"
+            [ -n "$reverts"     ] && printf "### ⏪ Reverts\n%b\n"        "$reverts"
+            [ -n "$abtests"     ] && printf "### 🧪 AB Tests\n%b\n"       "$abtests"
+            [ -n "$others"      ] && printf "### 📦 Other Changes\n%b\n"  "$others"
+            [ -n "$prev_tag"    ] && echo "**Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/${prev_tag}...${{ steps.tag.outputs.version }}"
+          } > /tmp/release_notes.md
+
+          cat /tmp/release_notes.md
+
       - name: Create git tag and GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,7 +166,7 @@ jobs:
           git tag ${{ steps.tag.outputs.version }}
           git push origin ${{ steps.tag.outputs.version }}
           gh release create ${{ steps.tag.outputs.version }} \
-            --generate-notes \
+            --notes-file /tmp/release_notes.md \
             --title "${{ steps.tag.outputs.version }}"
 
       # GitHub API로 머지된 PR의 head branch 조회 (squash/rebase merge에도 동작)
